@@ -1,0 +1,43 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+
+# Ses dosyaları ve çıktılar
+voices/*.wav
+!voices/.gitkeep
+outputs/*.mp3
+!outputs/.gitkeep
+temp_chunks/
+*.mp3
+*.wav
+test_*.wav
+test_*.mp3
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Test dosyaları
+quick_test.py
+test_tts.py
+test_voice.py
+upload_voice.py
+
+# Geçici dosyalar
+temp_*
