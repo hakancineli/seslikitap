@@ -201,7 +201,7 @@ def generate_audiobook(pdf_file, text_input, voice_dropdown_selected, voice_file
             voice_path = voice_dropdown_selected
             print(f"📚 Hazır ses kullanılıyor: {voice_path}")
         else:
-            voice_path = voice_file.name if hasattr(voice_file, 'name') else voice_file
+        voice_path = voice_file.name if hasattr(voice_file, 'name') else voice_file
             print(f"📤 Yüklenen ses kullanılıyor: {voice_path}")
         
         print(f"\n{'='*60}")
