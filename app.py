@@ -14,8 +14,6 @@ from text_cleaner import TextCleaner, TurkishTextPreprocessor
 from advanced_tts import AdvancedTTS
 from voice_catalog import VoiceCatalog, TurkishTTSModels
 from elevenlabs_integration import ElevenLabsTTS, ElevenLabsConfig
-from custom_tts_api import CustomTTSAPI
-from openai_tts_api import OpenAITTSAPI
 
 
 # Global değişkenler
@@ -146,7 +144,7 @@ def record_voice_interface(duration):
         return None, f"❌ Hata: {str(e)}"
 
 
-def generate_audiobook(pdf_file, text_input, voice_dropdown_selected, voice_file, tts_engine_choice, openai_api_key_input, api_voice_choice, speed_control, pitch_control, progress=gr.Progress()):
+def generate_audiobook(pdf_file, text_input, voice_dropdown_selected, voice_file, speed_control, pitch_control, progress=gr.Progress()):
     """Sesli kitap oluştur"""
     
     # Metin veya PDF kontrolü
@@ -201,7 +199,7 @@ def generate_audiobook(pdf_file, text_input, voice_dropdown_selected, voice_file
             voice_path = voice_dropdown_selected
             print(f"📚 Hazır ses kullanılıyor: {voice_path}")
         else:
-        voice_path = voice_file.name if hasattr(voice_file, 'name') else voice_file
+            voice_path = voice_file.name if hasattr(voice_file, 'name') else voice_file
             print(f"📤 Yüklenen ses kullanılıyor: {voice_path}")
         
         print(f"\n{'='*60}")
@@ -226,115 +224,59 @@ def generate_audiobook(pdf_file, text_input, voice_dropdown_selected, voice_file
         print(f"✅ Kullanılacak ses dosyası: {voice_path}")
         print(f"{'='*60}\n")
         
+        # TTS Engine - SES KLONLAMA BURADA BAŞLIYOR
+        print(f"🚀 TTS motoru başlatılıyor - REFERANS SES: {voice_path}")
+        print(f"⚡ Hız: {speed_control}x")
+        print(f"🎵 Ton: {pitch_control:+d}")
+        
+        # Gelişmiş özellikler varsa AdvancedTTS kullan
+        if speed_control != 1.0 or pitch_control != 0:
+            engine = AdvancedTTS(voice_path)
+            use_advanced = True
+        else:
+            engine = M1OptimizedTTS(voice_path, use_progress_bar=False)
+            use_advanced = False
+        
         # Output path
         output_path = f"outputs/audiobook_{int(time.time())}.mp3"
         os.makedirs("outputs", exist_ok=True)
         
-        # TTS Motor Seçimi
-        print(f"\n{'='*60}")
-        print(f"🎙️ TTS MOTOR SEÇİMİ")
-        print(f"{'='*60}")
-        print(f"Motor: {tts_engine_choice}")
-        
         progress(0.4, desc=f"🎤 {len(sentences)} cümle seslendiriliyor...")
         
-        # Motor seçimine göre işlem yap
-        if tts_engine_choice == "🌐 OpenAI TTS (Hızlı, Önerilen)":
-            # OPENAI TTS KULLAN (ÇOK HIZLI + KALİTELİ!)
-            print(f"🌐 OpenAI TTS API kullanılıyor!")
-            print(f"🎤 API Ses: {api_voice_choice}")
-            print(f"🚀 Tahmini süre: ~{len(sentences) * 0.3 / 60:.1f} dakika")
-            
-            if not openai_api_key_input or not openai_api_key_input.strip():
-                return None, """
-❌ OpenAI API Key gerekli!
-
-📝 Nasıl Alınır:
-1. https://platform.openai.com/api-keys
-2. "Create new secret key" tıklayın
-3. Key'i kopyalayın (sk-...)
-4. Yukarıdaki alana yapıştırın
-
-💰 Fiyatlandırma:
-- TTS-HD: $0.03/1000 karakter
-- 100 cümle (~5000 kar): ~$0.15
-                """
-            
-            try:
-                openai_api = OpenAITTSAPI(api_key=openai_api_key_input.strip())
-                audiobook_path = openai_api.generate_audiobook(
-                    sentences, 
-                    voice=api_voice_choice,
-                    output_path=output_path
-                )
-            except Exception as e:
-                return None, f"❌ OpenAI API hatası: {str(e)}\n\nAPI key'inizi kontrol edin."
-        
-        elif tts_engine_choice == "⚡ Özel API (Deneysel)":
-            # ÖZEL TTS API KULLAN (Deneysel - CortexAI Proxy)
-            print(f"⚡ Özel TTS API kullanılıyor!")
-            print(f"🎤 API Ses: {api_voice_choice}")
-            
-            try:
-                custom_api = CustomTTSAPI()
-                audiobook_path = custom_api.generate_audiobook(
-                    sentences, 
-                    voice=api_voice_choice,
-                    output_path=output_path
-                )
-            except Exception as e:
-                return None, f"❌ Özel API hatası: {str(e)}\n\n💡 CortexAI proxy TTS endpoint'ini desteklemiyor olabilir.\nOpenAI TTS veya XTTS v2'yi deneyin."
-        
-        else:
-            # XTTS V2 KULLAN (Lokal, Yavaş ama Ücretsiz)
-            print(f"🖥️ XTTS v2 (Lokal) kullanılıyor")
-            print(f"🎤 Referans ses: {voice_path}")
-            print(f"⚡ Hız: {speed_control}x")
-            print(f"🎵 Ton: {pitch_control:+d}")
-            
-            # Gelişmiş özellikler varsa AdvancedTTS kullan
-            if speed_control != 1.0 or pitch_control != 0:
-                engine = AdvancedTTS(voice_path)
-                use_advanced = True
-            else:
-                engine = M1OptimizedTTS(voice_path, use_progress_bar=False)
-                use_advanced = False
-            
-            # Üret (gelişmiş özelliklerle veya normal)
-            if use_advanced:
-                # Gelişmiş özelliklerle üret
-                print("🎭 Gelişmiş özellikler kullanılıyor...")
-                audio_chunks = []
-                for i, sentence_data in enumerate(sentences):
-                    chunk_path = f"temp_chunks/chunk_{i:04d}.wav"
-                    os.makedirs("temp_chunks", exist_ok=True)
-                    
-                    success = engine.generate_with_style(
-                        sentence_data['text'],
-                        chunk_path,
-                        speed=speed_control,
-                        pitch_shift=pitch_control
-                    )
-                    
-                    if success:
-                        from pydub import AudioSegment
-                        audio = AudioSegment.from_wav(chunk_path)
-                        pause_ms = int(sentence_data['pause_after'] * 1000)
-                        silence = AudioSegment.silent(duration=pause_ms)
-                        audio_chunks.append(audio + silence)
+        # Üret (gelişmiş özelliklerle veya normal)
+        if use_advanced:
+            # Gelişmiş özelliklerle üret
+            print("🎭 Gelişmiş özellikler kullanılıyor...")
+            audio_chunks = []
+            for i, sentence_data in enumerate(sentences):
+                chunk_path = f"temp_chunks/chunk_{i:04d}.wav"
+                os.makedirs("temp_chunks", exist_ok=True)
                 
-                # Birleştir ve kaydet
-                if audio_chunks:
-                    from pydub import AudioSegment
-                    final_audio = sum(audio_chunks)
-                    final_audio = final_audio.normalize()
-                    final_audio.export(output_path, format="mp3", bitrate="192k")
-                    audiobook_path = output_path
-                else:
-                    return None, "❌ Ses üretilemedi"
+                success = engine.generate_with_style(
+                    sentence_data['text'],
+                    chunk_path,
+                    speed=speed_control,
+                    pitch_shift=pitch_control
+                )
+                
+                if success:
+                    audio = AudioSegment.from_wav(chunk_path)
+                    pause_ms = int(sentence_data['pause_after'] * 1000)
+                    silence = AudioSegment.silent(duration=pause_ms)
+                    audio_chunks.append(audio + silence)
+            
+            # Birleştir ve kaydet
+            if audio_chunks:
+                from pydub import AudioSegment
+                final_audio = sum(audio_chunks)
+                final_audio = final_audio.normalize()
+                final_audio.export(output_path, format="mp3", bitrate="192k")
+                audiobook_path = output_path
             else:
-                # Normal üretim
-        audiobook_path = engine.generate_audiobook(sentences, output_path)
+                return None, "❌ Ses üretilemedi"
+        else:
+            # Normal üretim
+            audiobook_path = engine.generate_audiobook(sentences, output_path)
         
         progress(1.0, desc="✅ Tamamlandı!")
         
@@ -531,50 +473,18 @@ with gr.Blocks(title="🎙️ Sesli Kitap Üretim Sistemi", theme=gr.themes.Soft
                         )
                     
                     with gr.Tab("📤 Ses Yükle"):
-                    voice_input = gr.Audio(
+                        voice_input = gr.Audio(
                             label="🎤 Kendi Sesinizi Yükle (WAV, MP3, M4A)",
-                        type="filepath",
-                        sources=["upload", "microphone"]
-                    )
-                    
-                    voice_validate_btn = gr.Button("✅ Sesi Doğrula", variant="secondary")
-                    voice_info = gr.Markdown("Ses yükledikten sonra doğrulayın")
-            
-            # TTS Motor Seçimi
-            gr.Markdown("---")
-            gr.Markdown("### 🎙️ TTS Motor Seçimi")
-            
-            tts_engine_choice = gr.Radio(
-                choices=[
-                    "🌐 OpenAI TTS (Hızlı, Önerilen)",
-                    "⚡ Özel API (Deneysel)",
-                    "🖥️ XTTS v2 (Lokal, Ücretsiz)"
-                ],
-                value="🌐 OpenAI TTS (Hızlı, Önerilen)",
-                label="TTS Motoru",
-                info="OpenAI: ~0.3 sn/cümle | XTTS v2: ~1.5 sn/cümle (MPS)"
-            )
-            
-            # OpenAI API Key
-            openai_api_key = gr.Textbox(
-                label="🔑 OpenAI API Key",
-                placeholder="sk-...",
-                type="password",
-                info="https://platform.openai.com/api-keys adresinden alın"
-            )
-            
-            # API Ses Seçimi (Özel API için)
-            api_voice_choice = gr.Dropdown(
-                choices=["alloy", "echo", "fable", "onyx", "nova", "shimmer"],
-                value="alloy",
-                label="🎤 API Ses Tipi",
-                info="Sadece Özel API seçiliyken kullanılır",
-                visible=True
-            )
+                            type="filepath",
+                            sources=["upload", "microphone"]
+                        )
+                        
+                        voice_validate_btn = gr.Button("✅ Sesi Doğrula", variant="secondary")
+                        voice_info = gr.Markdown("Ses yükledikten sonra doğrulayın")
             
             # Gelişmiş Kontroller
             gr.Markdown("---")
-            gr.Markdown("### 🎛️ Gelişmiş Kontroller (Sadece XTTS v2 için)")
+            gr.Markdown("### 🎛️ Gelişmiş Kontroller (Opsiyonel)")
             
             with gr.Row():
                 speed_control = gr.Slider(
@@ -633,7 +543,7 @@ with gr.Blocks(title="🎙️ Sesli Kitap Üretim Sistemi", theme=gr.themes.Soft
             
             generate_btn.click(
                 fn=generate_audiobook,
-                inputs=[pdf_input, text_input, voice_dropdown, voice_input, tts_engine_choice, openai_api_key, api_voice_choice, speed_control, pitch_control],
+                inputs=[pdf_input, text_input, voice_dropdown, voice_input, speed_control, pitch_control],
                 outputs=[audiobook_output, generation_info]
             )
         

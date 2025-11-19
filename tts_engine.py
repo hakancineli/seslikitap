@@ -24,19 +24,22 @@ class M1OptimizedTTS:
             voice_sample_path: Klonlanacak sesin yolu (10-30 saniye, WAV format)
             use_progress_bar: Progress bar kullan (web arayüzünde False önerilir)
         """
-        # GPU Desteği (Optimizasyon Seviye 1 - 5-10x Hızlanma!)
+        # GPU Desteği (Optimizasyon Seviye 1)
         import os
         os.environ['PYTORCH_ENABLE_MPS_FALLBACK'] = '1'
         
+        # XTTS v2 + MPS = FFT hatası veriyor (PyTorch bilinen bug)
+        # Geçici olarak CPU kullanıyoruz (yine de batch processing ile hızlı)
+        self.device = "cpu"
+        
         if torch.backends.mps.is_available():
-            self.device = "mps"  # M1/M2/M3 GPU
-            self._safe_print("🚀 M1/M2/M3 GPU (MPS) kullanılıyor - 5-10x daha hızlı!")
+            self._safe_print("💡 M1/M2/M3 GPU tespit edildi ama XTTS v2 MPS'te sorunlu")
+            self._safe_print("   CPU + Batch Processing kullanılıyor (~3-5 sn/cümle)")
         elif torch.cuda.is_available():
             self.device = "cuda"
             self._safe_print("🚀 NVIDIA GPU kullanılıyor!")
         else:
-            self.device = "cpu"
-            self._safe_print("⚠️  GPU bulunamadı, CPU kullanılıyor (yavaş olacak)")
+            self._safe_print("🖥️  CPU kullanılıyor (Batch processing aktif ~3-5 sn/cümle)")
         
         self.use_progress_bar = use_progress_bar
         self._safe_print(f"🖥️  Cihaz: {self.device.upper()}")
@@ -173,7 +176,8 @@ class M1OptimizedTTS:
         self._safe_print(f"⏱️  Tahmini süre: {self.estimate_time(total)}")
         
         # Batch processing için ayar (Optimizasyon Seviye 2)
-        BATCH_SIZE = 3 if self.device == "mps" or self.device == "cuda" else 1
+        # CPU için batch=1 daha stabil
+        BATCH_SIZE = 1  # CPU için tek tek işle (3-5 sn/cümle)
         if BATCH_SIZE > 1:
             self._safe_print(f"🔄 Batch processing aktif: {BATCH_SIZE} cümle/batch")
         
