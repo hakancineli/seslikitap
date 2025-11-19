@@ -10,15 +10,17 @@ from sentence_processor import SentenceProcessor
 from tts_engine import M1OptimizedTTS
 from voice_manager import VoiceManager
 from voice_recorder import VoiceRecorder
-from text_cleaner import TextCleaner
+from text_cleaner import TextCleaner, TurkishTextPreprocessor
 from advanced_tts import AdvancedTTS
 from voice_catalog import VoiceCatalog, TurkishTTSModels
+from elevenlabs_integration import ElevenLabsTTS, ElevenLabsConfig
 
 
 # Global değişkenler
 voice_manager = VoiceManager()
 voice_recorder = VoiceRecorder()
 voice_catalog = VoiceCatalog()
+elevenlabs_tts = ElevenLabsTTS()
 
 # Kataloğu tara (ilk başlatmada)
 voice_catalog.scan_voices()
@@ -320,6 +322,90 @@ def list_saved_voices():
     return result
 
 
+def generate_with_elevenlabs(text_input, voice_name, profile_name, stability, similarity):
+    """ElevenLabs ile ses üret"""
+    if not text_input.strip():
+        return None, "❌ Lütfen metin girin"
+    
+    # API key kontrolü
+    if not elevenlabs_tts.api_key:
+        return None, """
+❌ ElevenLabs API anahtarı bulunamadı!
+
+📝 API Anahtarı Nasıl Alınır:
+1. https://elevenlabs.io/sign-up adresine gidin
+2. Ücretsiz hesap oluşturun (10,000 karakter/ay ücretsiz)
+3. Profile > API Keys'den anahtarınızı kopyalayın
+4. Aşağıya yapıştırın ve kaydedin
+
+💡 Veya terminal'de:
+```
+export ELEVENLABS_API_KEY='your-api-key-here'
+```
+        """
+    
+    try:
+        # Metin temizleme
+        cleaned_text = TextCleaner.clean_text(text_input, turkish_preprocess=True)
+        
+        # Output dosyası
+        output_path = f"outputs/elevenlabs_{int(time.time())}.mp3"
+        os.makedirs("outputs", exist_ok=True)
+        
+        # Profil kullanımı varsa
+        if profile_name and profile_name != "Manuel Ayar":
+            audio_data = elevenlabs_tts.generate_with_profile(
+                text=cleaned_text,
+                profile_name=profile_name,
+                output_path=output_path
+            )
+        else:
+            # Manuel ayarlarla
+            audio_data = elevenlabs_tts.generate_speech(
+                text=cleaned_text,
+                voice_name=voice_name,
+                output_path=output_path,
+                stability=stability,
+                similarity_boost=similarity
+            )
+        
+        if audio_data:
+            info = f"""
+## ✅ Ses Oluşturuldu!
+
+- **Dosya:** {output_path}
+- **Ses:** {voice_name}
+- **Karakter Sayısı:** {len(cleaned_text)}
+- **Motor:** ElevenLabs Multilingual v2
+
+🎧 Aşağıdan dinleyebilir veya indirebilirsiniz!
+            """
+            return output_path, info
+        else:
+            return None, "❌ Ses oluşturulamadı. API anahtarını kontrol edin."
+            
+    except Exception as e:
+        import traceback
+        return None, f"❌ Hata: {str(e)}\n\n```\n{traceback.format_exc()}\n```"
+
+
+def save_elevenlabs_api_key(api_key):
+    """ElevenLabs API anahtarını kaydet"""
+    if not api_key or not api_key.strip():
+        return "❌ Lütfen API anahtarı girin"
+    
+    try:
+        ElevenLabsConfig.save_api_key(api_key.strip())
+        
+        # Global TTS nesnesini güncelle
+        global elevenlabs_tts
+        elevenlabs_tts = ElevenLabsTTS(api_key.strip())
+        
+        return "✅ API anahtarı kaydedildi! Artık ElevenLabs'i kullanabilirsiniz."
+    except Exception as e:
+        return f"❌ Kaydetme hatası: {str(e)}"
+
+
 # Gradio Arayüzü
 with gr.Blocks(title="🎙️ Sesli Kitap Üretim Sistemi", theme=gr.themes.Soft()) as app:
     
@@ -529,7 +615,169 @@ with gr.Blocks(title="🎙️ Sesli Kitap Üretim Sistemi", theme=gr.themes.Soft
             # İlk yüklemede göster
             app.load(fn=list_saved_voices, outputs=[voices_list])
         
-        # TAB 4: Yardım
+        # TAB 4: ElevenLabs TTS
+        with gr.Tab("🌐 ElevenLabs TTS"):
+            gr.Markdown("""
+            # 🌐 ElevenLabs Profesyonel TTS
+            
+            **Yüksek kaliteli, doğal Türkçe sesler ile TTS üretin!**
+            
+            ElevenLabs'in multilingual v2 modeli ile profesyonel ses sentezi.
+            """)
+            
+            with gr.Row():
+                with gr.Column():
+                    gr.Markdown("### 🔑 API Anahtarı")
+                    gr.Markdown("""
+                    ElevenLabs API anahtarınız varsa buraya girin:
+                    - [Ücretsiz hesap oluştur](https://elevenlabs.io/sign-up) (10,000 karakter/ay)
+                    - [API anahtarını al](https://elevenlabs.io/app/settings/api-keys)
+                    """)
+                    
+                    elevenlabs_api_key_input = gr.Textbox(
+                        label="API Anahtarı",
+                        placeholder="sk-...",
+                        type="password"
+                    )
+                    
+                    api_save_btn = gr.Button("💾 API Anahtarını Kaydet", variant="secondary")
+                    api_status = gr.Markdown("API durumu: Bilinmiyor")
+                    
+                    api_save_btn.click(
+                        fn=save_elevenlabs_api_key,
+                        inputs=[elevenlabs_api_key_input],
+                        outputs=[api_status]
+                    )
+            
+            gr.Markdown("---")
+            
+            # Metin girişi
+            elevenlabs_text_input = gr.Textbox(
+                label="📝 Metin",
+                placeholder="Seslendirilecek metni buraya yazın...",
+                lines=6
+            )
+            
+            with gr.Row():
+                with gr.Column():
+                    gr.Markdown("### 🎤 Ses Seçimi")
+                    
+                    elevenlabs_voice_dropdown = gr.Dropdown(
+                        choices=["ada", "emre", "aylin", "burak"],
+                        value="ada",
+                        label="Türkçe Ses",
+                        info="Resmi Türkçe sesler"
+                    )
+                    
+                    # Ses bilgileri
+                    gr.Markdown("""
+                    **Sesler:**
+                    - **Ada**: Kadın, genç, net - Edebi metinler
+                    - **Emre**: Erkek, orta yaş, sıcak - Profesyonel
+                    - **Aylin**: Kadın, olgun, otoriter - Haber
+                    - **Burak**: Erkek, genç, enerjik - Reklam
+                    """)
+                
+                with gr.Column():
+                    gr.Markdown("### 🎭 Ses Profili")
+                    
+                    elevenlabs_profile_dropdown = gr.Dropdown(
+                        choices=[
+                            "Manuel Ayar",
+                            "story_teller_male",
+                            "story_teller_female",
+                            "educator_male",
+                            "news_anchor_female",
+                            "wise_elder",
+                            "young_hero"
+                        ],
+                        value="Manuel Ayar",
+                        label="Ses Stili",
+                        info="Hazır profiller veya manuel ayar"
+                    )
+                    
+                    gr.Markdown("""
+                    **Profiller:**
+                    - **story_teller_male**: Hikaye anlatıcısı (erkek)
+                    - **story_teller_female**: Hikaye anlatıcısı (kadın)
+                    - **educator_male**: Eğitmen sesi
+                    - **news_anchor_female**: Haber sunucusu
+                    - **wise_elder**: Bilge yaşlı
+                    - **young_hero**: Genç kahraman
+                    """)
+            
+            # Manuel ayarlar
+            gr.Markdown("### 🎛️ Manuel Ayarlar")
+            with gr.Row():
+                elevenlabs_stability = gr.Slider(
+                    minimum=0,
+                    maximum=1,
+                    value=0.5,
+                    step=0.1,
+                    label="Stabilite",
+                    info="Düşük=Daha ifadeli, Yüksek=Daha kararlı"
+                )
+                
+                elevenlabs_similarity = gr.Slider(
+                    minimum=0,
+                    maximum=1,
+                    value=0.75,
+                    step=0.05,
+                    label="Benzerlik",
+                    info="Orijinal sese benzerlik"
+                )
+            
+            elevenlabs_generate_btn = gr.Button("🎬 Ses Üret (ElevenLabs)", variant="primary", size="lg")
+            
+            with gr.Row():
+                elevenlabs_audio_output = gr.Audio(
+                    label="🎧 Oluşturulan Ses",
+                    type="filepath"
+                )
+                
+                elevenlabs_info_output = gr.Markdown("Ses bilgileri burada görünecek")
+            
+            elevenlabs_generate_btn.click(
+                fn=generate_with_elevenlabs,
+                inputs=[
+                    elevenlabs_text_input,
+                    elevenlabs_voice_dropdown,
+                    elevenlabs_profile_dropdown,
+                    elevenlabs_stability,
+                    elevenlabs_similarity
+                ],
+                outputs=[elevenlabs_audio_output, elevenlabs_info_output]
+            )
+            
+            gr.Markdown("""
+            ---
+            ### 💰 Fiyatlandırma
+            
+            - **Ücretsiz Plan**: 10,000 karakter/ay
+            - **Starter**: $5/ay - 30,000 karakter
+            - **Creator**: $22/ay - 100,000 karakter
+            - **Pro**: $99/ay - 500,000 karakter
+            
+            ### 🌟 Özellikler
+            
+            - ✅ Profesyonel kalite
+            - ✅ Doğal tonlamalar
+            - ✅ Çok dilli destek (Türkçe dahil)
+            - ✅ Hızlı üretim
+            - ✅ API entegrasyonu
+            
+            ### 📚 Karşılaştırma
+            
+            | Özellik | XTTS v2 (Yerel) | ElevenLabs (Cloud) |
+            |---------|-----------------|---------------------|
+            | **Kalite** | Çok İyi | Mükemmel |
+            | **Hız** | ~4s/cümle | ~1s/cümle |
+            | **Maliyet** | Ücretsiz | $5-99/ay |
+            | **İnternet** | Sadece ilk indirme | Her kullanımda gerekli |
+            | **Ses Klonlama** | Evet (referans gerekli) | Hazır sesler + Klonlama |
+            """)
+        
+        # TAB 5: Yardım
         with gr.Tab("❓ Yardım"):
             gr.Markdown("""
             ## 📖 Kullanım Kılavuzu
