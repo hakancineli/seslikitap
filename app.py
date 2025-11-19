@@ -12,11 +12,16 @@ from voice_manager import VoiceManager
 from voice_recorder import VoiceRecorder
 from text_cleaner import TextCleaner
 from advanced_tts import AdvancedTTS
+from voice_catalog import VoiceCatalog, TurkishTTSModels
 
 
 # Global değişkenler
 voice_manager = VoiceManager()
 voice_recorder = VoiceRecorder()
+voice_catalog = VoiceCatalog()
+
+# Kataloğu tara (ilk başlatmada)
+voice_catalog.scan_voices()
 
 
 def analyze_pdf(pdf_file):
@@ -137,15 +142,18 @@ def record_voice_interface(duration):
         return None, f"❌ Hata: {str(e)}"
 
 
-def generate_audiobook(pdf_file, text_input, voice_file, speed_control, pitch_control, progress=gr.Progress()):
+def generate_audiobook(pdf_file, text_input, voice_dropdown_selected, voice_file, speed_control, pitch_control, progress=gr.Progress()):
     """Sesli kitap oluştur"""
     
     # Metin veya PDF kontrolü
     if pdf_file is None and not text_input.strip():
         return None, "❌ PDF dosyası yükleyin veya metin girin"
     
-    if voice_file is None:
-        return None, "❌ Ses dosyası yükleyin veya kaydedin"
+    # Ses dosyası: Hazır seslerden VEYA yüklenmiş
+    selected_voice = voice_dropdown_selected or voice_file
+    
+    if selected_voice is None:
+        return None, "❌ Hazır seslerden seçin VEYA ses dosyası yükleyin"
     
     try:
         # Metin kaynağını belirle
@@ -184,7 +192,13 @@ def generate_audiobook(pdf_file, text_input, voice_file, speed_control, pitch_co
         progress(0.3, desc="🎙️ TTS motoru hazırlanıyor...")
         
         # Ses dosyası formatını kontrol et ve gerekirse dönüştür
-        voice_path = voice_file.name if hasattr(voice_file, 'name') else voice_file
+        # Öncelik: Dropdown seçimi > Yüklenen dosya
+        if voice_dropdown_selected:
+            voice_path = voice_dropdown_selected
+            print(f"📚 Hazır ses kullanılıyor: {voice_path}")
+        else:
+            voice_path = voice_file.name if hasattr(voice_file, 'name') else voice_file
+            print(f"📤 Yüklenen ses kullanılıyor: {voice_path}")
         
         print(f"\n{'='*60}")
         print(f"🎤 REFERANS SES DOSYASI KONTROL EDİLİYOR")
@@ -353,14 +367,34 @@ with gr.Blocks(title="🎙️ Sesli Kitap Üretim Sistemi", theme=gr.themes.Soft
                     pdf_info = gr.Markdown("PDF yükledikten sonra analiz edin")
                 
                 with gr.Column():
-                    voice_input = gr.Audio(
-                        label="🎤 Ses Dosyası Yükle veya Kaydet (WAV, MP3, M4A desteklenir)",
-                        type="filepath",
-                        sources=["upload", "microphone"]
-                    )
+                    gr.Markdown("### 🎭 Ses Seçimi")
                     
-                    voice_validate_btn = gr.Button("✅ Sesi Doğrula", variant="secondary")
-                    voice_info = gr.Markdown("Ses yükledikten sonra doğrulayın")
+                    # Hazır seslerden seç VEYA yeni yükle
+                    with gr.Tab("📚 Hazır Sesler"):
+                        voice_dropdown = gr.Dropdown(
+                            choices=voice_catalog.get_voice_choices(),
+                            label="Hazır Ses Klonlarından Seç",
+                            info="Profesyonel sesli kitap sanatçıları"
+                        )
+                        
+                        # TTS Modeli seçimi
+                        model_choices = [(m['name'], m['id']) for m in TurkishTTSModels.MODELS]
+                        tts_model_dropdown = gr.Dropdown(
+                            choices=model_choices,
+                            value="xtts_v2",
+                            label="🤖 TTS Modeli",
+                            info="⭐ XTTS v2 önerilir (en iyi klonlama)"
+                        )
+                    
+                    with gr.Tab("📤 Ses Yükle"):
+                        voice_input = gr.Audio(
+                            label="🎤 Kendi Sesinizi Yükle (WAV, MP3, M4A)",
+                            type="filepath",
+                            sources=["upload", "microphone"]
+                        )
+                        
+                        voice_validate_btn = gr.Button("✅ Sesi Doğrula", variant="secondary")
+                        voice_info = gr.Markdown("Ses yükledikten sonra doğrulayın")
             
             # Gelişmiş Kontroller
             gr.Markdown("---")
@@ -423,7 +457,7 @@ with gr.Blocks(title="🎙️ Sesli Kitap Üretim Sistemi", theme=gr.themes.Soft
             
             generate_btn.click(
                 fn=generate_audiobook,
-                inputs=[pdf_input, text_input, voice_input, speed_control, pitch_control],
+                inputs=[pdf_input, text_input, voice_dropdown, voice_input, speed_control, pitch_control],
                 outputs=[audiobook_output, generation_info]
             )
         
