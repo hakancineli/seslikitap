@@ -10,6 +10,8 @@ from sentence_processor import SentenceProcessor
 from tts_engine import M1OptimizedTTS
 from voice_manager import VoiceManager
 from voice_recorder import VoiceRecorder
+from text_cleaner import TextCleaner
+from advanced_tts import AdvancedTTS
 
 
 # Global değişkenler
@@ -50,9 +52,12 @@ def analyze_text(text_input):
         return "❌ Metin girin"
     
     try:
-        word_count = len(text_input.split())
-        char_count = len(text_input)
-        paragraph_count = len([p for p in text_input.split('\n\n') if p.strip()])
+        # Metni temizle
+        cleaned_text = TextCleaner.clean_text(text_input)
+        
+        word_count = len(cleaned_text.split())
+        char_count = len(cleaned_text)
+        paragraph_count = len([p for p in cleaned_text.split('\n\n') if p.strip()])
         estimated_duration = word_count / 150  # dakika
         estimated_processing = word_count / 150 * 4 / 60  # dakika
         
@@ -65,8 +70,10 @@ def analyze_text(text_input):
 - **Tahmini Sesli Kitap Süresi:** {estimated_duration:.0f} dakika
 - **Tahmini İşlem Süresi (M1):** ~{estimated_processing:.0f} dakika
 
-### 📝 İlk 500 Karakter:
-{text_input[:500]}...
+### 📝 Temizlenmiş Metin (İlk 500 Karakter):
+{cleaned_text[:500]}...
+
+✅ Özel karakterler otomatik olarak düzeltildi
         """
         
         return info
@@ -130,7 +137,7 @@ def record_voice_interface(duration):
         return None, f"❌ Hata: {str(e)}"
 
 
-def generate_audiobook(pdf_file, text_input, voice_file, progress=gr.Progress()):
+def generate_audiobook(pdf_file, text_input, voice_file, speed_control, pitch_control, progress=gr.Progress()):
     """Sesli kitap oluştur"""
     
     # Metin veya PDF kontrolü
@@ -146,9 +153,12 @@ def generate_audiobook(pdf_file, text_input, voice_file, progress=gr.Progress())
             # Direkt metin girilmiş
             progress(0, desc="📝 Metin işleniyor...")
             
-            full_text = text_input
-            page_count = len(text_input.split('\n\n'))  # Paragraf sayısı
-            word_count = len(text_input.split())
+            # METİN TEMİZLEME - Özel karakterleri düzelt
+            print("\n🧹 Metin temizleniyor (özel karakterler düzeltiliyor)...")
+            full_text = TextCleaner.clean_text(text_input, verbose=True)
+            
+            page_count = len(full_text.split('\n\n'))  # Paragraf sayısı
+            word_count = len(full_text.split())
             
         else:
             # PDF yüklenmiş
@@ -200,7 +210,16 @@ def generate_audiobook(pdf_file, text_input, voice_file, progress=gr.Progress())
         
         # TTS Engine - SES KLONLAMA BURADA BAŞLIYOR
         print(f"🚀 TTS motoru başlatılıyor - REFERANS SES: {voice_path}")
-        engine = M1OptimizedTTS(voice_path, use_progress_bar=False)  # Web arayüzünde progress bar devre dışı
+        print(f"⚡ Hız: {speed_control}x")
+        print(f"🎵 Ton: {pitch_control:+d}")
+        
+        # Gelişmiş özellikler varsa AdvancedTTS kullan
+        if speed_control != 1.0 or pitch_control != 0:
+            engine = AdvancedTTS(voice_path)
+            use_advanced = True
+        else:
+            engine = M1OptimizedTTS(voice_path, use_progress_bar=False)
+            use_advanced = False
         
         # Output path
         output_path = f"outputs/audiobook_{int(time.time())}.mp3"
@@ -208,8 +227,40 @@ def generate_audiobook(pdf_file, text_input, voice_file, progress=gr.Progress())
         
         progress(0.4, desc=f"🎤 {len(sentences)} cümle seslendiriliyor...")
         
-        # Üret (progress callback ile)
-        audiobook_path = engine.generate_audiobook(sentences, output_path)
+        # Üret (gelişmiş özelliklerle veya normal)
+        if use_advanced:
+            # Gelişmiş özelliklerle üret
+            print("🎭 Gelişmiş özellikler kullanılıyor...")
+            audio_chunks = []
+            for i, sentence_data in enumerate(sentences):
+                chunk_path = f"temp_chunks/chunk_{i:04d}.wav"
+                os.makedirs("temp_chunks", exist_ok=True)
+                
+                success = engine.generate_with_style(
+                    sentence_data['text'],
+                    chunk_path,
+                    speed=speed_control,
+                    pitch_shift=pitch_control
+                )
+                
+                if success:
+                    audio = AudioSegment.from_wav(chunk_path)
+                    pause_ms = int(sentence_data['pause_after'] * 1000)
+                    silence = AudioSegment.silent(duration=pause_ms)
+                    audio_chunks.append(audio + silence)
+            
+            # Birleştir ve kaydet
+            if audio_chunks:
+                from pydub import AudioSegment
+                final_audio = sum(audio_chunks)
+                final_audio = final_audio.normalize()
+                final_audio.export(output_path, format="mp3", bitrate="192k")
+                audiobook_path = output_path
+            else:
+                return None, "❌ Ses üretilemedi"
+        else:
+            # Normal üretim
+            audiobook_path = engine.generate_audiobook(sentences, output_path)
         
         progress(1.0, desc="✅ Tamamlandı!")
         
@@ -311,6 +362,29 @@ with gr.Blocks(title="🎙️ Sesli Kitap Üretim Sistemi", theme=gr.themes.Soft
                     voice_validate_btn = gr.Button("✅ Sesi Doğrula", variant="secondary")
                     voice_info = gr.Markdown("Ses yükledikten sonra doğrulayın")
             
+            # Gelişmiş Kontroller
+            gr.Markdown("---")
+            gr.Markdown("### 🎛️ Gelişmiş Kontroller (Opsiyonel)")
+            
+            with gr.Row():
+                speed_control = gr.Slider(
+                    minimum=0.5,
+                    maximum=2.0,
+                    value=1.0,
+                    step=0.1,
+                    label="⚡ Konuşma Hızı (0.5=Yavaş, 1.0=Normal, 2.0=Hızlı)",
+                    info="Sesi daha yavaş veya hızlı okut"
+                )
+                
+                pitch_control = gr.Slider(
+                    minimum=-5,
+                    maximum=5,
+                    value=0,
+                    step=1,
+                    label="🎵 Ses Tonu (-5=Alçak, 0=Normal, +5=Yüksek)",
+                    info="Sesin tonunu değiştir"
+                )
+            
             generate_btn = gr.Button("🎬 Sesli Kitap Oluştur", variant="primary", size="lg")
             
             with gr.Row():
@@ -349,7 +423,7 @@ with gr.Blocks(title="🎙️ Sesli Kitap Üretim Sistemi", theme=gr.themes.Soft
             
             generate_btn.click(
                 fn=generate_audiobook,
-                inputs=[pdf_input, text_input, voice_input],
+                inputs=[pdf_input, text_input, voice_input, speed_control, pitch_control],
                 outputs=[audiobook_output, generation_info]
             )
         

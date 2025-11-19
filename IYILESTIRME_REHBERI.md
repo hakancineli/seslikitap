@@ -165,3 +165,6 @@ Sorunlarınız devam ederse:
 **Son Güncelleme**: İyileştirilmiş TTS parametreleri ve 24000 Hz sample rate
 **Önerilen Test**: Yeni ses kaydı + kısa metin (5-10 cümle)
 
+
+
+
